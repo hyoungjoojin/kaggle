@@ -10,6 +10,7 @@
 # %%
 from typing import List, Tuple
 
+import mlflow
 import numpy as np
 import pandas as pd
 import torch
@@ -21,14 +22,19 @@ from tqdm import tqdm
 TRAIN_CSV = "./data/train.csv"
 TEST_CSV = "./data/test.csv"
 
-NUM_EPOCHS = 10
-BATCH_SIZE = 64
+# %%
+params = {
+    "num_epochs": 10,
+    "batch_size": 64,
+    "learning_rate": 3e-4,
+}
 DEVICE = torch.device(
     "cuda"
     if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available() else "cpu"
 )
 
+# %%
 SEED = 503
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -36,6 +42,11 @@ torch.cuda.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+# %%
+mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
+mlflow.set_experiment("Digit Recognizer")
+MLFLOW_RUN_NAME = "DR1"
+MLFLOW_RUN_DESCRIPTION = "Initial experiment"
 
 # %% [markdown]
 """
@@ -73,7 +84,7 @@ class DigitDataLoader(data.DataLoader):
     def __init__(
         self,
         dataset: data.Dataset,
-        batch_size: int = BATCH_SIZE,
+        batch_size: int = params["batch_size"],
         *args,
         **kwargs,
     ) -> None:
@@ -173,16 +184,12 @@ def accuracy(pred: torch.Tensor, real: torch.Tensor) -> Tuple[int, int]:
 ## Training Procedure
 """
 
-# %%
-model = DigitClassifier().to(DEVICE)
-optimizer = torch.optim.Adam(lr=3e-4, params=model.parameters())
-criterion = nn.CrossEntropyLoss().to(DEVICE)
 
-best_validation_loss = 1000000
-for i in range(NUM_EPOCHS):
+# %%
+def train_one_epoch(epoch: int) -> float:
     model.train()
     total_iter, total_loss, total_right, total_wrong = 0, 0.0, 0, 0
-    for batch_idx, (image, label) in tqdm(
+    for _, (image, label) in tqdm(
         enumerate(train_dataloader),
         total=len(train_dataloader),
     ):
@@ -204,14 +211,18 @@ for i in range(NUM_EPOCHS):
 
     train_loss = total_loss / total_iter
     train_accuracy = total_right / (total_right + total_wrong)
-    print(f"[TRAIN] Epoch {i}")
+
+    print(f"[TRAIN] Epoch {epoch}")
     print(f"\tLoss: {train_loss:4f}")
+    mlflow.log_metric("train_loss", train_loss, step=epoch)
+
     print(f"\tAcc : {train_accuracy:4f}%")
+    mlflow.log_metric("train_accuracy", train_accuracy, step=epoch)
 
     model.eval()
     total_iter, total_loss, total_right, total_wrong = 0, 0.0, 0, 0
     with torch.no_grad():
-        for batch_idx, (image, label) in tqdm(
+        for _, (image, label) in tqdm(
             enumerate(val_dataloader),
             total=len(val_dataloader),
         ):
@@ -229,15 +240,41 @@ for i in range(NUM_EPOCHS):
 
     val_loss = total_loss / total_iter
     val_accuracy = total_right / (total_right + total_wrong)
-    print(f"[VAL] Epoch {i}")
-    print(f"\tLoss: {val_loss:4f}")
-    print(f"\tAcc : {val_accuracy:4f}%")
 
-    if val_loss >= best_validation_loss:
-        print("Validation loss did not decrease. Early stopping.")
-        break
-    else:
-        best_validation_loss = val_loss
+    print(f"[VAL] Epoch {epoch}")
+    print(f"\tLoss: {val_loss:4f}")
+    mlflow.log_metric("val_loss", val_loss, step=epoch)
+
+    print(f"\tAcc : {val_accuracy:4f}%")
+    mlflow.log_metric("val_accuracy", val_accuracy, step=epoch)
+
+    return val_loss
+
+
+# %%
+model = DigitClassifier().to(DEVICE)
+optimizer = torch.optim.Adam(
+    lr=params["learning_rate"],
+    params=model.parameters(),
+)
+criterion = nn.CrossEntropyLoss().to(DEVICE)
+
+best_validation_loss = 1000000
+
+with mlflow.start_run(
+    run_name=MLFLOW_RUN_NAME,
+    description=MLFLOW_RUN_DESCRIPTION,
+):
+    for key, value in params.items():
+        mlflow.log_param(key, value)
+    for i in range(params["num_epochs"]):
+        val_loss = train_one_epoch(i)
+
+        if val_loss >= best_validation_loss:
+            print("Validation loss did not decrease. Early stopping.")
+            break
+        else:
+            best_validation_loss = val_loss
 
 
 # %% [markdown]
