@@ -3,7 +3,7 @@
 # Digit Recognizer
 ## Simple CNN with an MLP Classifier
 
-- LB Score: 0.97978
+- Public LB Score: 0.98382
 
 """
 
@@ -16,6 +16,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.utils.data as data
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
@@ -24,9 +26,9 @@ TEST_CSV = "./data/test.csv"
 
 # %%
 params = {
-    "num_epochs": 10,
+    "num_epochs": 40,
     "batch_size": 64,
-    "learning_rate": 3e-4,
+    "learning_rate": 1e-4,
 }
 DEVICE = torch.device(
     "cuda"
@@ -45,8 +47,7 @@ torch.backends.cudnn.benchmark = False
 # %%
 mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
 mlflow.set_experiment("Digit Recognizer")
-MLFLOW_RUN_NAME = "DR1"
-MLFLOW_RUN_DESCRIPTION = "Initial experiment"
+MLFLOW_RUN_NAME = "DR2"
 
 # %% [markdown]
 """
@@ -62,16 +63,40 @@ def columns_to_image(columns: List) -> np.ndarray:
     return image
 
 
+def normalize(
+    image: torch.Tensor,
+    mean: float = 0.5,
+    std: float = 0.5,
+) -> torch.Tensor:
+    return F.normalize(image, mean=[mean], std=[std])
+
+
 class DigitDataset(data.Dataset):
-    def __init__(self, images: List, labels: List) -> None:
+    def __init__(
+        self,
+        images: List,
+        labels: List,
+        train: bool = True,
+    ) -> None:
         super(DigitDataset, self).__init__()
         assert len(images) == len(labels)
         self.images = images
         self.labels = labels
+        self.train = train
+        self.augment = transforms.Compose(
+            [
+                transforms.RandomCrop(size=28, padding=1),
+            ]
+        )
 
     def __getitem__(self, index: int) -> Tuple:
         image = columns_to_image(self.images[index].tolist())
         image = torch.from_numpy(image).float().unsqueeze(0)
+
+        if self.train:
+            image = self.augment(image)
+
+        image = normalize(image)
 
         label = self.labels[index]
         return (image, label)
@@ -119,9 +144,9 @@ train_X, val_X, train_y, val_y = train_test_split(
 
 
 train_dataset = DigitDataset(train_X, train_y)
-val_dataset = DigitDataset(val_X, val_y)
+val_dataset = DigitDataset(val_X, val_y, train=False)
 
-train_dataloader = DigitDataLoader(train_dataset)
+train_dataloader = DigitDataLoader(train_dataset, shuffle=True)
 val_dataloader = DigitDataLoader(val_dataset)
 
 
@@ -293,6 +318,7 @@ def generate_submission(
     model.eval()
 
     results = []
+
     for _, row in tqdm(test_X.iterrows(), total=len(test_X)):
         image = (
             torch.from_numpy(columns_to_image(row.tolist()))
@@ -301,6 +327,8 @@ def generate_submission(
             .unsqueeze(dim=0)
             .unsqueeze(dim=0)
         )
+
+        image = normalize(image)
 
         label = model(image).squeeze()
         results.append(torch.argmax(label).item())
