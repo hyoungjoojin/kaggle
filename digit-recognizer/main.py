@@ -3,7 +3,7 @@
 # Digit Recognizer
 ## Simple CNN with an MLP Classifier
 
-- Public LB Score: 0.98382
+- Public LB Score: 0.98250
 
 """
 
@@ -29,7 +29,9 @@ params = {
     "num_epochs": 40,
     "batch_size": 64,
     "learning_rate": 1e-4,
+    "activation": "ReLU",
 }
+
 DEVICE = torch.device(
     "cuda"
     if torch.cuda.is_available()
@@ -47,7 +49,8 @@ torch.backends.cudnn.benchmark = False
 # %%
 mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
 mlflow.set_experiment("Digit Recognizer")
-MLFLOW_RUN_NAME = "DR2"
+MLFLOW_RUN_NAME = "DR3"
+MLFLOW_RUN_DESCRIPTION = ""
 
 # %% [markdown]
 """
@@ -158,24 +161,32 @@ val_dataloader = DigitDataLoader(val_dataset)
 
 # %%
 class DigitClassifier(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, activation: str, *args, **kwargs) -> None:
         super(DigitClassifier, self).__init__(*args, **kwargs)
+
+        match activation:
+            case "ReLU":
+                self.activation = nn.ReLU
+            case "LeakyReLU":
+                self.activation = nn.LeakyReLU
+            case _:
+                print(
+                    f"No activation named {activation}.",
+                    "Using default ReLU function.",
+                )
+                self.activation = nn.ReLU
+
         self.convolutional_layers = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=5, kernel_size=3, padding=1),
-            nn.BatchNorm2d(num_features=5),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, padding=1),
-            nn.BatchNorm2d(num_features=5),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(kernel_size=2),
+            self.build_convolution_block(1, 5),
+            self.build_convolution_block(5, 10),
+            self.build_convolution_block(10, 10),
         )
 
         self.linear_layers = nn.Sequential(
-            nn.Linear(in_features=245, out_features=100),
-            nn.BatchNorm1d(num_features=100),
-            nn.ReLU(),
-            nn.Linear(in_features=100, out_features=10),
+            nn.Linear(in_features=90, out_features=50),
+            nn.BatchNorm1d(num_features=50),
+            self.activation(),
+            nn.Linear(in_features=50, out_features=10),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -183,6 +194,23 @@ class DigitClassifier(nn.Module):
         x = torch.flatten(x, start_dim=1)
         x = self.linear_layers(x)
         return x
+
+    def build_convolution_block(
+        self,
+        in_channels: int,
+        out_channels: int,
+    ) -> nn.Module:
+        return nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1,
+            ),
+            nn.BatchNorm2d(num_features=out_channels),
+            self.activation(),
+            nn.MaxPool2d(kernel_size=2),
+        )
 
 
 # %% [markdown]
@@ -277,8 +305,8 @@ def train_one_epoch(epoch: int) -> float:
 
 
 # %%
-model = DigitClassifier().to(DEVICE)
-optimizer = torch.optim.Adam(
+model = DigitClassifier(activation=params["activation"]).to(DEVICE)
+optimizer = torch.optim.AdamW(
     lr=params["learning_rate"],
     params=model.parameters(),
 )
