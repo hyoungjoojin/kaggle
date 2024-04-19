@@ -3,7 +3,7 @@
 # Digit Recognizer
 ## Simple CNN with an MLP Classifier
 
-- Public LB Score: 0.98250
+- Public LB Score: 0.98910
 
 """
 
@@ -49,7 +49,7 @@ torch.backends.cudnn.benchmark = False
 # %%
 mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
 mlflow.set_experiment("Digit Recognizer")
-MLFLOW_RUN_NAME = "DR3"
+MLFLOW_RUN_NAME = "DR4"
 MLFLOW_RUN_DESCRIPTION = ""
 
 # %% [markdown]
@@ -177,16 +177,16 @@ class DigitClassifier(nn.Module):
                 self.activation = nn.ReLU
 
         self.convolutional_layers = nn.Sequential(
-            self.build_convolution_block(1, 5),
-            self.build_convolution_block(5, 10),
-            self.build_convolution_block(10, 10),
+            self.build_convolution_block(1, 30),
+            self.build_convolution_block(30, 30),
+            self.build_convolution_block(30, 15),
         )
 
         self.linear_layers = nn.Sequential(
-            nn.Linear(in_features=90, out_features=50),
-            nn.BatchNorm1d(num_features=50),
+            nn.Linear(in_features=135, out_features=75),
+            nn.BatchNorm1d(num_features=75),
             self.activation(),
-            nn.Linear(in_features=50, out_features=10),
+            nn.Linear(in_features=75, out_features=10),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
